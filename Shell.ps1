@@ -20,7 +20,7 @@ class ConPtyShell {
 
 class ConPtyShellMainClass {
     
-    static [void] DisplayHelp() {
+    hidden static [void] DisplayHelp() {
         $help = @"
 ConPtyShell - Fully Interactive Reverse Shell for Windows
 Author: splinter_code
@@ -65,17 +65,17 @@ Examples:
         Write-Host $help
     }
 
-    static [bool] HelpRequired([string] $param) {
+    hidden static [bool] HelpRequired([string] $param) {
         return ($param -eq "-h") -or ($param -eq "--help") -or ($param -eq "/?")
     }
 
-    static [void] CheckArgs([string[]] $arguments) {
+    hidden static [void] CheckArgs([string[]] $arguments) {
         if ($arguments.Length -lt 2) {
             throw [ConPtyShellException] "Not enough arguments. 2 Arguments required. Use --help for additional help."
         }
     }
 
-    static [string] CheckRemoteIpArg([string] $ipString) {
+    hidden static [string] CheckRemoteIpArg([string] $ipString) {
         try {
             [System.Net.IPAddress]::Parse($ipString)
         } catch {
@@ -85,7 +85,7 @@ Examples:
         return $ipString
     }
 
-    static [uint32] CheckUint([string] $arg) {
+    hidden static [uint32] CheckUint([string] $arg) {
         try {
             return [uint32]$arg
         } catch {
@@ -93,7 +93,7 @@ Examples:
         }
     }
 
-    static [uint32] ParseRows([string[]] $arguments) {
+    hidden static [uint32] ParseRows([string[]] $arguments) {
         [uint32] $rows = 24;
         if ($arguments.Length -gt 2) {
             $rows = [ConPtyShellMainClass]::CheckUint($arguments[2]);
@@ -101,7 +101,7 @@ Examples:
         return $rows;
     }
 
-    static [uint32] ParseCols([string[]] $arguments) {
+    hidden static [uint32] ParseCols([string[]] $arguments) {
         [uint32] $cols = 80;
         if ($arguments.Length -gt 3) {
             $cols = [ConPtyShellMainClass]::CheckUint($arguments[3]);
@@ -109,7 +109,7 @@ Examples:
         return $cols;
     }
 
-    static [string] ParseCommandLine([string[]] $arguments) {
+    hidden static [string] ParseCommandLine([string[]] $arguments) {
         [string] $commandLine = "powershell.exe"
 
         if ($arguments.Length -gt 4) {
