@@ -809,11 +809,33 @@ class ConPtyShell {
         $parentProcess = $null
         $grandParentProcess = $null
 
-        $Domain = [AppDomain]::CurrentDomain
-        $DynAssembly = New-Object System.Reflection.AssemblyName('TestAssembly')
-        $AssemblyBuilder = $Domain.DefineDynamicAssembly($DynAssembly, [System.Reflection.Emit.AssemblyBuilderAccess]::Run) # Only run in memory
-        $ModuleBuilder = $AssemblyBuilder.DefineDynamicModule('TimeStampModule', $False)
-        
+
+
+
+
+
+        $Mod = New-InMemoryModule -ModuleName Win32
+
+        $FunctionDefinitions = @(
+            (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+            (func kernel32 GetModuleHandle ([Intptr]) @([String]) -SetLastError)
+        )
+
+        $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
+        $Kernel32 = $Types['kernel32']
+
+
+        $kernel32base = $Kernel32::GetModuleHandle('kernel32')
+
+        [bool] $conptyCompatible = $false
+        if ($Kernel32::GetProcAddress($kernel32base, 'CreatePseudoConsole') -ne [IntPtr]::Zero) {
+            $conptyCompatible = $true
+        }
+
+        # $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        # Write-Host "[GetProcAddress]: Error: $(([ComponentModel.Win32Exception] $LastError).Message)"
+
+        Write-Host "ConPtyCompatble: $conptyCompatible"
 
         Write-Host "remoteIP: $remoteIp, remotePort: $remotePort, rows: $rows, cols: $cols, cmdLine $commandLine, upShell $upgradeShell"
 
