@@ -796,7 +796,7 @@ $global:SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
 $FunctionDefinitions = @(
     (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
-    (func kernel32 CreatePipe ([bool]) @([IntPtr], [IntPtr], $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [Int]) -Charset Auto -SetLastError)
+    (func kernel32 CreatePipe ([bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError)
 )
 
 $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
@@ -820,37 +820,20 @@ class ConPtyShell {
 
     hidden static [void] CreatePipes([IntPtr] $InputPipeRead, [IntPtr] $InputPipeWrite, [IntPtr] $OutputPipeRead, [IntPtr] $OutputPipeWrite) {
 
-        # Create a instance of the SECURITY_ATTRIBUTES struct
-        # $pSec = New-Object -TypeName SECURITY_ATTRIBUTES
-        $pSec = [Activator]::CreateInstance($global:SECURITY_ATTRIBUTES_TYPE)
-        
+        $Kernel32 = $global:Kernel32
+
+        $pSec = New-Object -TypeName "SECURITY_ATTRIBUTES"
         $pSec.nLength = $global:SECURITY_ATTRIBUTES_TYPE::GetSize()
         $pSec.bInheritHandle = 1
         $pSec.lpSecurityDescriptor = [IntPtr]::Zero
 
-        # $ref = $pSec -as [IntPtr]
-
-        Write-Host $InputPipeRead
-        Write-Host $InputPipeWrite
-        Write-Host $pSec
-        Write-Host $pSec.nLength
-        # Write-Host $ref
-
-        $Kernel32 = $global:Kernel32
-
-        $secattr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($global:SECURITY_ATTRIBUTES_TYPE::GetSize())
-
-        $sa = $secattr -as $global:SECURITY_ATTRIBUTES_TYPE
-        $sa.nLength = $global:SECURITY_ATTRIBUTES_TYPE::GetSize()
-        $sa.bInheritHandle = 1
-        $sa.lpSecurityDescriptor = [IntPtr]::Zero
-
-        Write-Host "plop"
-        $res = $Kernel32::CreatePipe($InputPipeRead, $InputPipeWrite, [ref] $secattr, [ConPtyShell]::BUFFER_SIZE_PIPE)
+        $res = $Kernel32::CreatePipe([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref]$pSec, [ConPtyShell]::BUFFER_SIZE_PIPE)
 
         Write-Host "plop 2"
         Write-Host "res: $res"
-        Write-Host "sa len: " $sa.nLength
+
+        $lastError = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw (New-Object ComponentModel.Win32Exception($lastError))
     }
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
