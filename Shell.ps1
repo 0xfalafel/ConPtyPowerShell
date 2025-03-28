@@ -793,17 +793,33 @@ $global:SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
     bInheritHandle =        field 2 Int
 }
 
+$global:WSAData_TYPE = struct $Mod WSAData @{
+    wVersion = field 0 Int16
+    wHighVersion = field 1 Int16
+    iMaxSockets = field 2 Int16
+    iMaxUdpDg = field 3 Int16
+    lpVendorInfo = field 4 IntPtr
+    szDescription = field 5 String -MarshalAs @('ByValTStr', 257)
+    szSystemStatus = field 6 String -MarshalAs @('ByValTStr', 129)
+}
+
+
 $FunctionDefinitions = @(
     (func kernel32 SetStdHandle ([IntPtr]) @([Int32], [IntPtr])),  
     (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
     (func kernel32 CreatePipe ([bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
     (func kernel32 CreateFile ([IntPtr]) @([String], [UInt32], [UInt32], [IntPtr], [UInt32], [UInt32], [IntPtr])),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
-    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError)
+    (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
+    # private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
+    (func ws2_32 WSAGetLastError ([Int32])),
+    (func ws2_32 WSAStartup ([Int32]) @([Int16], $global:WSAData_TYPE.MakeByRefType()))
+#    (func ws2_32 WSAStartup ([Int32]) @([Int16], [IntPtr]))# $global:WSAData.MakeByRefType()))
 )
 
 $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
 $global:Kernel32 = $Types['kernel32']
+$global:ws2_32 = $Types['ws2_32']
 
 
 class ConPtyShellException : System.Exception {
@@ -828,8 +844,18 @@ class ConPtyShell {
     hidden static [Int32] $STD_OUTPUT_HANDLE = -11;
     hidden static [Int32] $STD_ERROR_HANDLE  = -12;
 
-    <# Define the class. Try constructors, properties, or methods. #>
     $ProccessInformation = $global:ProccessInformation
+
+    hidden static [void] InitWSAThread() {
+        Write-Host "plop"
+        $data = New-Object -TypeName "WSAData"
+
+        if ($global:ws2_32::WSAStartup(2 -shl 8 -bor 2, [ref]$data) -ne 0) {
+            $error_code = $global:ws2_32::WSAGetLastError()
+            throw [ConPtyShellException] "WSAStartup failed with error code: $error_code"
+        }
+    }
+
 
     hidden static [void] CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite) {
         $Kernel32 = $global:Kernel32
@@ -899,6 +925,11 @@ class ConPtyShell {
 
         # comment the below function to debug errors
         [ConPtyShell]::InitConsole([ref] $oldStdIn, [ref] $oldStdOut, [ref] $oldStdErr)
+
+        # init wsastartup stuff for this thread
+        [ConPtyShell]::InitWSAThread();
+
+
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         Write-Host "Err msg: " $LastError.Message
