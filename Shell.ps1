@@ -918,24 +918,9 @@ class ConPtyShell {
         $sockinfo = New-Object -TypeName "SOCKADDR_IN"
         $sockinfo.sin_family = 2
         $sockinfo.sin_addr = $ws2_32::inet_addr($host)
-        [Int16] $hport = [Int16] $ws2_32::htons($port)
-        $sockinfo.sin_port = $hport
-        $sockinfo.sin_zero = 0
+        $sockinfo.sin_port = [Int16] $ws2_32::htons($port)
 
-
-        $size = $global:SOCKADDR_IN::GetSize()
-        Write-Host "size: $size" 
-
-        $size_family = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_family)
-        Write-Host "sin_family: $size_family" 
-        $size_addr = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_addr)
-        Write-Host "sin_addr: $size_addr" 
-        $size_port = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_port)
-        Write-Host "sin_port: $size_port" 
-        $size_zero = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_zero)
-        Write-Host "sin_zero: $size_zero" 
-
-        if ($ws2_32::connect($socket, [ref]$sockinfo, $size) -ne 0) {
+        if ($ws2_32::connect($socket, [ref]$sockinfo, $global:SOCKADDR_IN::GetSize()) -ne 0) {
             $error_code = $global:ws2_32::WSAGetLastError()
             throw [ConPtyShellException] "WSAConnect failed with error code: $error_code"
         }
