@@ -814,6 +814,11 @@ $global:SECURITY_ATTRIBUTES_TYPE = struct $Mod SECURITY_ATTRIBUTES @{
     bInheritHandle =        field 2 Int
 }
 
+$global:COORD = struct $Mod COORD @{
+    X = field 0 Int16
+    Y = field 1 Int16
+}
+
 $global:WSAData_TYPE = struct $Mod WSAData @{
     wVersion = field 0 Int16
     wHighVersion = field 1 Int16
@@ -883,6 +888,9 @@ $FunctionDefinitions = @(
     (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
     (func kernel32 CloseHandle ([Bool]) @([IntPtr])),
     (func kernel32 CreatePipe ([Bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
+    (func kernel32 CreatePseudoConsole ([Int32]) @($global:COORD.MakeByRefType(), [IntPtr], [IntPtr], [UInt32], [IntPtr])),
+    (func kernel32 ClosePseudoConsole ([Int32]) @([IntPtr])),
+   
     (func kernel32 CreateFile ([IntPtr]) @([String], [UInt32], [UInt32], [IntPtr], [UInt32], [UInt32], [IntPtr])),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
     (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
@@ -899,12 +907,15 @@ $FunctionDefinitions = @(
     (func ws2_32 inet_addr ([UInt32]) @([String]) -Charset Ansi -SetLastError),
     (func ws2_32 WSAGetLastError ([Int32])),
     (func ws2_32 WSAStartup ([Int32]) @([Int16], $global:WSAData_TYPE.MakeByRefType())),
-    (func ws2_32 recv ([Int32]) @([IntPtr], [Byte[]], [Int32], [UInt32]) -Charset Auto -SetLastError)
+    (func ws2_32 recv ([Int32]) @([IntPtr], [Byte[]], [Int32], [UInt32]) -Charset Auto -SetLastError),
+    (func ntdll NtSuspendProcess ([UInt32]) @([IntPtr])),
+    (func ntdll NtResumeProcess ([UInt32]) @([IntPtr]))
 )
 
 $Types = $FunctionDefinitions | Add-Win32Type -Module $Mod -Namespace 'Win32'
 $global:Kernel32 = $Types['kernel32']
 $global:ws2_32 = $Types['ws2_32']
+$global:ntdll = $Types['ntdll']
 
 
 class ConPtyShellException : System.Exception {
@@ -1033,12 +1044,14 @@ class ConPtyShell {
         [bool] $conptyCompatible = $false
         [bool] $IsSocketOverlapped = $true
         [string] $output = ""
-        $currentProcess = $null
-        $parentProcess = $null
-        $grandParentProcess = $null
+        [System.Diagnostics.Process] $currentProcess = $null
+        [System.Diagnostics.Process] $parentProcess = $null
+        [System.Diagnostics.Process] $grandParentProcess = $null
 
 
         $Kernel32 = $global:Kernel32
+        $ntdll = $global:ntdll
+
         $kernel32base = $Kernel32::GetModuleHandle('kernel32')
 
         [bool] $conptyCompatible = $false
@@ -1090,14 +1103,26 @@ class ConPtyShell {
         if ($InputPipeRead -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($InputPipeRead)}
         if ($OutputPipeWrite -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($OutputPipeWrite)}
 
-        
+        if ($upgradeShell) {
+            # we need to suspend other processes that can interact with the duplicated sockets if any. This will ensure stdin, stdout and stderr is read/write only by our conpty process
+            if ($parentSocketInherited) {$ntdll::NtSuspendProcess($parentProcess.Handle)}
+            if ($grandParentSocketInherited) {$ntdll::NtSuspendProcess($grandParentProcess.Handle)}
+            if (! $IsSocketOverlapped) {
+                Write-Host "Todo!" -ForegroundColor Yellow
+            }
+        }
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         Write-Host "Err msg: " $LastError.Message
 
         Write-Host "remoteIP: $remoteIp, remotePort: $remotePort, rows: $rows, cols: $cols, cmdLine $commandLine, upShell $upgradeShell"
 
-        return "Hi mom!"
+        if ($handlePseudoConsole -ne [IntPtr]::Zero) {$Kernel32::ClosePseudoConsole($handlePseudoConsole)}
+        if ($InputPipeWrite -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($InputPipeWrite)}
+        if ($OutputPipeRead -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($OutputPipeRead)}
+
+        Write-Host "ConPtyShell kindly exited"
+        return ""
     }
 }
 
